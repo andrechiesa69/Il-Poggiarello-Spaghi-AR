@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1f306e">
+  <title>Gas Sales Energia – Esperienza AR</title>
+  <link rel="icon" href="sportelli.png">
+  <link rel="apple-touch-icon" href="sportelli.png">
+
+  <!-- Librerie incluse nel repository (nessun CDN esterno) -->
+  <script src="aframe.min.js"></script>
+  <script src="mindar-image-aframe.prod.js"></script>
+
+  <style>
+    :root { --blu:#1f306e; --arancio:#e06830; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; color:#fff;
+      font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overscroll-behavior:none; touch-action:none; }
+    #ar-container { position:fixed; inset:0; overflow:hidden; transform-origin:0 0; will-change:transform; touch-action:none; }
+    #ar-container video { object-fit:cover; }
+
+    /* Pulsante zoom: compare quando si ingrandisce, tocca per tornare a 1× */
+    #zoomBtn { position:fixed; right:calc(14px + env(safe-area-inset-right)); top:calc(14px + env(safe-area-inset-top)); z-index:25;
+      appearance:none; border:0; border-radius:999px; padding:9px 14px; font-size:14px; font-weight:800; color:#fff;
+      background:rgba(15,25,70,.78); box-shadow:0 4px 14px rgba(0,0,0,.35); display:flex; align-items:center; gap:6px; }
+    #zoomBtn svg { width:16px; height:16px; }
+
+    /* Sito aperto dentro la pagina, con pulsante per tornare all'AR */
+    #site { position:fixed; inset:0; z-index:50; background:#fff; display:flex; flex-direction:column; touch-action:auto; }
+    #site .bar { flex:0 0 auto; display:flex; align-items:center; gap:8px; background:var(--blu);
+      padding:calc(8px + env(safe-area-inset-top)) 10px 8px; box-shadow:0 2px 10px rgba(0,0,0,.3); }
+    #backAR { appearance:none; border:0; border-radius:999px; background:var(--arancio); color:#fff; font-weight:800; font-size:14.5px;
+      padding:10px 14px; display:flex; align-items:center; gap:6px; cursor:pointer; flex:1 1 auto; justify-content:center; max-width:340px; white-space:nowrap; }
+    #backAR svg { width:18px; height:18px; flex:0 0 auto; }
+    #extLink { color:#fff; font-size:12.5px; font-weight:700; text-decoration:none; padding:10px 6px; white-space:nowrap; opacity:.9; }
+    #site .frameWrap { flex:1 1 auto; position:relative; overflow:auto; -webkit-overflow-scrolling:touch; touch-action:auto; }
+    #siteFrame { position:absolute; inset:0; width:100%; height:100%; border:0; background:#fff; touch-action:auto; }
+    #siteLoading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--blu); font-weight:700; background:#fff; }
+    #siteLoading .spinner { border-color:rgba(31,48,110,.2); border-top-color:var(--blu); margin:0 12px 0 0; width:28px; height:28px; border-width:3px; }
+
+    .overlay { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center; justify-content:center;
+      padding:calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom)); text-align:center; }
+    .hidden { display:none !important; }
+    .btn { appearance:none; border:0; border-radius:999px; padding:15px 32px; font-size:17px; font-weight:800; color:#fff;
+      background:var(--arancio); box-shadow:0 8px 24px rgba(224,104,48,.45); cursor:pointer; }
+
+    /* Mirino di scansione con angoli bianchi */
+    #scanning { pointer-events:none; z-index:10; }
+    .frame { width:min(70vw, 320px); aspect-ratio:1102/1880; max-height:62vh; position:relative; }
+    .frame i { position:absolute; width:36px; height:36px; border:4px solid #fff; border-radius:4px; filter:drop-shadow(0 0 4px rgba(0,0,0,.5)); }
+    .frame i:nth-child(1){ top:0; left:0; border-right:0; border-bottom:0; }
+    .frame i:nth-child(2){ top:0; right:0; border-left:0; border-bottom:0; }
+    .frame i:nth-child(3){ bottom:0; left:0; border-right:0; border-top:0; }
+    .frame i:nth-child(4){ bottom:0; right:0; border-left:0; border-top:0; }
+    .frame .scanline { position:absolute; left:6%; right:6%; height:3px; background:linear-gradient(90deg, transparent, #fff, transparent);
+      box-shadow:0 0 14px #9cc0ff; animation:scan 2.2s ease-in-out infinite; }
+    @keyframes scan { 0%{ top:4%; } 50%{ top:94%; } 100%{ top:4%; } }
+    .hint { margin-top:22px; background:rgba(15,25,70,.72); padding:10px 18px; border-radius:999px; font-size:15px; font-weight:600; }
+
+    #loading { z-index:15; background:rgba(13,22,56,.85); }
+    .spinner { width:46px; height:46px; border-radius:50%; border:4px solid rgba(255,255,255,.25); border-top-color:#fff; animation:spin 1s linear infinite; margin-bottom:16px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    #error { z-index:30; background:#0d1638; }
+    #error h2 { margin:0 0 12px; font-size:20px; }
+    #error p { max-width:340px; line-height:1.45; opacity:.9; margin:0 0 10px; font-size:15px; }
+    .small { font-size:12.5px; opacity:.8; max-width:320px; line-height:1.4; }
+    #warn-inapp { background:rgba(255,255,255,.12); border-radius:12px; padding:10px 14px; font-size:13.5px; line-height:1.4; margin-bottom:16px; max-width:340px; }
+
+    #tap-hint { position:fixed; left:50%; bottom:calc(22px + env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:12;
+      background:rgba(15,25,70,.78); padding:9px 16px; border-radius:999px; font-size:13.5px; font-weight:600; pointer-events:none;
+      transition:opacity .5s; text-align:center; width:max-content; max-width:calc(100vw - 32px); line-height:1.35; }
+    #toast { position:fixed; left:50%; top:calc(18px + env(safe-area-inset-top)); transform:translateX(-50%); z-index:40;
+      background:#fff; color:var(--blu); padding:10px 16px; border-radius:12px; font-weight:700; font-size:14px; box-shadow:0 8px 24px rgba(0,0,0,.35);
+      display:flex; gap:12px; align-items:center; }
+    #toast a { color:#fff; background:var(--arancio); text-decoration:none; padding:7px 12px; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <div id="ar-container"></div>
+
+  <div id="loading" class="overlay">
+    <div class="spinner"></div>
+    <div>Avvio della fotocamera…</div>
+  </div>
+
+  <div id="scanning" class="overlay hidden">
+    <div class="frame"><i></i><i></i><i></i><i></i><div class="scanline"></div></div>
+    <div class="hint">Inquadra tutta la pagina</div>
+  </div>
+
+  <div id="tap-hint" class="hidden" style="opacity:0">Tocca un logo per aprire il sito<br>Usa due dita per ingrandire</div>
+  <button id="zoomBtn" class="hidden" type="button" aria-label="Riporta lo zoom a 1x">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+    <span id="zoomVal">1×</span>
+  </button>
+  <div id="site" class="hidden">
+    <div class="bar">
+      <button id="backAR" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        Torna alla realtà aumentata
+      </button>
+      <a id="extLink" href="#" target="_blank" rel="noopener">Browser ↗</a>
+    </div>
+    <div class="frameWrap">
+      <iframe id="siteFrame" title="Sito Gas Sales" allow="fullscreen"></iframe>
+      <div id="siteLoading"><div class="spinner"></div>Caricamento…</div>
+    </div>
+  </div>
+  <div id="toast" class="hidden"><span>Apri il sito</span><a id="toastLink" href="#" target="_blank" rel="noopener">Apri</a></div>
+
+  <div id="error" class="overlay hidden">
+    <h2>Fotocamera non disponibile</h2>
+    <div id="warn-inapp" class="hidden">Stai usando il browser interno di un'app. Apri questa pagina in <b>Safari</b> (iPhone) o <b>Chrome</b> (Android).</div>
+    <p id="errorMsg">Non è stato possibile accedere alla fotocamera.</p>
+    <p class="small">iPhone: Impostazioni › Safari › Fotocamera › Consenti.<br>Android: tocca il lucchetto nella barra degli indirizzi › Autorizzazioni › Fotocamera.</p>
+    <button class="btn" onclick="location.reload()" style="margin-top:14px">Riprova</button>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------
+     CONFIGURAZIONE
+     Coordinate sul target MindAR: larghezza pagina = 1, centro = (0,0), y verso l'alto.
+     Calcolate dai pixel della foto target (1102 x 1880):  x = px/1102 - 0.5 ;  y = (940 - py)/1102
+  ------------------------------------------------------------------ */
+  var IMG_W = 1102, IMG_H = 1880;
+  function P(px, py) { return { x: px / IMG_W - 0.5, y: (IMG_H / 2 - py) / IMG_W }; }
+
+  // Foto AR del palazzo + cerchio blu: allineata alla stampa con registrazione automatica dei punti (SIFT):
+  // scala 0.535, rotazione 2.38°, centro in pixel (396.9, 1006.7)
+  var PALAZZO_IMG = { src: 'palazzogoticoar.png', at: P(396.9, 1006.7), w: 0.6732, h: 0.6659, rotZ: -2.38, z: 0.012 };
+
+  // plate = riquadro [x0,y0,x1,y1] in pixel che copre il logo stampato (evita l'effetto "doppio")
+  var NAVY = 'rgba(22,36,92,0.88)', PAPER = 'rgba(246,244,240,0.97)';
+  var LINKS = [
+    // logo azienda: senza sfondo, sovrapposto esattamente al logo stampato
+    { id: 'logoazienda', hand: [0.36, -0.08],   src: 'logoazienda.png',   size: [1440, 174], at: P(537, 124),  w: 0.7634, z: 0.006, rotZ: -2.2, still: true, url: 'https://www.gassalesenergia.it/' },
+    { id: 'luce',          src: 'luce.png',          size: [328, 476],  at: P(145, 478),  w: 0.115, z: 0.03, plate: [82, 400, 212, 560],    pc: NAVY,  url: 'https://www.gassalesenergia.it/offerte-luce/' },
+    { id: 'gas',           src: 'gas.png',           size: [251, 476],  at: P(343, 395),  w: 0.090, z: 0.03, plate: [280, 305, 418, 480],   pc: NAVY,  url: 'https://www.gassalesenergia.it/offerte-gas/' },
+    { id: 'efficienza',    src: 'efficienza.png',    size: [407, 469],  at: P(668, 402),  w: 0.150, z: 0.03, plate: [572, 300, 770, 500],   pc: NAVY,  url: 'https://www.gassalesenergia.it/selosopagomeno/' },
+    { id: 'sostenibilita', src: 'sostenibilita.png', size: [476, 365],  at: P(877, 494),  w: 0.180, z: 0.03, plate: [770, 415, 985, 575],   pc: NAVY,  url: 'https://www.gassalesenergia.it/sostenibilita/' },
+    // ext: true → il sito non si lascia mostrare dentro la pagina: si apre direttamente (si torna all'AR con "indietro")
+    { id: 'gassales', hand: [0.30, -0.18],      src: 'gassales.png',      size: [438, 215],  at: P(138, 1745), w: 0.23,  z: 0.03, plate: [22, 1672, 255, 1815],  pc: PAPER, url: 'https://www.gassalespiacenza.it/', ext: true },
+    { id: 'sportelli', hand: [0.26, -0.26],     src: 'sportelli.png',     size: [440, 440],  at: P(935, 1705), w: 0.135, z: 0.03, plate: [872, 1640, 998, 1772], pc: PAPER, url: 'https://www.gassalesenergia.it/sportelli/' }
+  ];
+
+  var params = new URLSearchParams(location.search);
+  var PREVIEW = params.has('preview');   // ?preview → anteprima senza fotocamera (per PC)
+
+  /* ------------------------------------------------------------------
+     TEXTURE SICURE (fix Android: loghi e immagini neri)
+     Su molti Android i PNG trasparenti (scala di grigi + alfa, 16 bit,
+     palette, profilo colore) arrivano alla GPU con il colore azzerato →
+     appaiono neri. Ridisegnando l'immagine su un canvas 2D diventa sempre
+     RGBA 8 bit standard: stesso risultato su Android e iOS.
+  ------------------------------------------------------------------ */
+  function setSRGB(tex) {
+    var T = AFRAME.THREE;
+    if ('colorSpace' in tex && T.SRGBColorSpace) tex.colorSpace = T.SRGBColorSpace;
+    else if (T.sRGBEncoding !== undefined) tex.encoding = T.sRGBEncoding;
+    return tex;
+  }
+  function whenImgReady(sel, cb) {
+    var img = document.querySelector(sel);
+    if (!img) return;
+    if (img.complete && img.naturalWidth) { cb(img); return; }
+    img.addEventListener('load', function () { cb(img); }, { once: true });
+  }
+  function textureFromImage(img, maxSize) {
+    var T = AFRAME.THREE, max = maxSize || 1024;
+    var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, max / Math.max(w, h));
+    var cv = document.createElement('canvas');
+    cv.width = Math.max(2, Math.round(w * k)); cv.height = Math.max(2, Math.round(h * k));
+    cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+    var tex = new T.CanvasTexture(cv);
+    tex.premultiplyAlpha = false;
+    tex.minFilter = T.LinearMipmapLinearFilter; tex.magFilter = T.LinearFilter; tex.generateMipmaps = true;
+    tex.wrapS = tex.wrapT = T.ClampToEdgeWrapping;
+    setSRGB(tex); tex.needsUpdate = true;
+    return tex;
+  }
+
+  /* ------------------------------------------------------------------
+     COMPONENTI
+  ------------------------------------------------------------------ */
+  // Piano con immagine (loghi, foto del palazzo): texture creata via canvas
+  AFRAME.registerComponent('img-plane', {
+    schema: { src: { type: 'string' }, w: { type: 'number' }, h: { type: 'number' }, double: { default: false }, depthWrite: { default: true }, alphaTest: { default: 0.02 }, max: { default: 1024 } },
+    init: function () {
+      var T = AFRAME.THREE, d = this.data, el = this.el;
+      this.mat = new T.MeshBasicMaterial({ transparent: true, alphaTest: d.alphaTest, depthWrite: d.depthWrite, side: d.double ? T.DoubleSide : T.FrontSide, color: 0xffffff });
+      this.mat.toneMapped = false;
+      this.mat.visible = false;   // invisibile finché la texture non è pronta
+      el.setObject3D('mesh', new T.Mesh(new T.PlaneGeometry(d.w, d.h), this.mat));
+      var mat = this.mat, renderer = el.sceneEl.renderer;
+      whenImgReady(d.src, function (img) {
+        var tex = textureFromImage(img, d.max);
+        try { if (renderer) tex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy()); } catch (e) {}
+        mat.map = tex; mat.visible = true; mat.needsUpdate = true;
+      });
+    }
+  });
+
+  // Apertura link al tocco: il sito si apre DENTRO la pagina con "Torna alla realtà aumentata"
+  // (la fotocamera resta accesa). ext: true → siti che lo vietano: si aprono subito nella stessa scheda.
+  AFRAME.registerComponent('link-open', {
+    schema: { url: { type: 'string' }, ext: { default: false } },
+    init: function () {
+      var el = this.el, url = this.data.url, ext = this.data.ext;
+      el.addEventListener('click', function () {
+        if (!window.__arVisible) return;
+        el.removeAttribute('animation__tap');
+        el.setAttribute('animation__tap', { property: 'scale', from: '1.18 1.18 1.18', to: '1 1 1', dur: 380, easing: 'easeOutBack' });
+        if (ext) { setTimeout(function () { window.location.href = url; }, 180); return; }
+        setTimeout(function () { window.openSite(url); }, 180);
+      });
+    }
+  });
+
+  // Base morbida sotto ogni logo AR: copre il logo stampato
+  AFRAME.registerComponent('soft-plate', {
+    schema: { w: { type: 'number' }, h: { type: 'number' }, color: { type: 'string' } },
+    init: function () {
+      var THREE = AFRAME.THREE, d = this.data;
+      var cw = 256, ch = Math.max(32, Math.round(256 * d.h / d.w)), blur = 10;
+      var cv = document.createElement('canvas'); cv.width = cw + blur * 4; cv.height = ch + blur * 4;
+      // Bordo sfumato con l'ombra (ctx.filter non funziona su Safari iOS):
+      // la forma è disegnata fuori dal canvas, resta visibile solo la sua ombra morbida
+      var OFF = cv.width + 50;
+      var g = cv.getContext('2d'), r = Math.min(cw, ch) * 0.22, x = blur * 2 - OFF, y = blur * 2;
+      g.fillStyle = d.color; g.shadowColor = d.color; g.shadowBlur = blur * 2; g.shadowOffsetX = OFF;
+      g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + cw, y, x + cw, y + ch, r); g.arcTo(x + cw, y + ch, x, y + ch, r);
+      g.arcTo(x, y + ch, x, y, r); g.arcTo(x, y, x + cw, y, r); g.closePath(); g.fill();
+      var tex = setSRGB(new THREE.CanvasTexture(cv)); tex.premultiplyAlpha = false;
+      this.mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0 });
+      this.el.setObject3D('mesh', new THREE.Mesh(new THREE.PlaneGeometry(d.w * cv.width / cw, d.h * cv.height / ch), this.mat));
+    },
+    tick: function (t, dt) {
+      var target = (window.__arVisible && window.__introStarted) ? 1 : 0;
+      this.mat.opacity += (target - this.mat.opacity) * Math.min(1, dt / 300);
+    }
+  });
+
+  // Dissolvenza della foto del palazzo quando la pagina viene trovata / persa
+  AFRAME.registerComponent('fade-visible', {
+    init: function () { this.o = 0; },
+    tick: function (t, dt) {
+      var m = this.el.getObject3D('mesh'); if (!m) return;
+      var target = (window.__arVisible && window.__introStarted) ? 1 : 0;
+      this.o += (target - this.o) * Math.min(1, dt / 250);
+      if (!m.material) return;
+      m.material.opacity = this.o; m.material.transparent = true;
+    }
+  });
+
+  // Manina animata "CLICCA QUI": si avvicina al logo, lo "tocca" e fa partire un'onda nel punto toccato
+  var HAND_TEX = null, RING_TEX = null;
+  function handTextures() {
+    if (HAND_TEX) return;
+    var THREE = AFRAME.THREE;
+    // icona mano che tocca (Material Icons "touch_app", licenza Apache 2.0), viewBox 24x24
+    var path = new Path2D('M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74l-3.43-.72c-.08-.01-.15-.03-.24-.03-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.91-1.38z');
+    var c = document.createElement('canvas'); c.width = c.height = 256;
+    var g = c.getContext('2d');
+    g.setTransform(256 / 26, 0, 0, 256 / 26, 256 / 26, 256 / 26 * 0.4);   // margine per contorno e ombra
+    g.lineJoin = 'round'; g.lineCap = 'round';
+    g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 6; g.shadowOffsetY = 1.5;
+    g.lineWidth = 2.4; g.strokeStyle = '#1f306e'; g.stroke(path);           // contorno blu Gas Sales
+    g.shadowColor = 'transparent';
+    g.fillStyle = '#ffffff'; g.fill(path);
+    g.lineWidth = 0.7; g.strokeStyle = '#e06830'; g.stroke(path);          // filo arancio
+    HAND_TEX = setSRGB(new THREE.CanvasTexture(c)); HAND_TEX.premultiplyAlpha = false;
+
+    var r = document.createElement('canvas'); r.width = r.height = 128;
+    var q = r.getContext('2d');
+    q.lineWidth = 11; q.strokeStyle = '#ffffff'; q.shadowColor = 'rgba(224,104,48,1)'; q.shadowBlur = 12;
+    q.beginPath(); q.arc(64, 64, 46, 0, Math.PI * 2); q.stroke();
+    RING_TEX = setSRGB(new THREE.CanvasTexture(r)); RING_TEX.premultiplyAlpha = false;
+  }
+
+  AFRAME.registerComponent('tap-hand', {
+    schema: { x: { default: 0 }, y: { default: 0 }, size: { default: 0.055 }, delay: { default: 0 }, url: { default: '' } },
+    init: function () {
+      var THREE = AFRAME.THREE, d = this.data, S = d.size;
+      handTextures();
+      this.t = -d.delay;
+      // punta del dito dell'icona: (11.5, 5.2) nel viewBox → spostamento del piano perché la punta stia sull'origine
+      var u = 256 / 26 / 256 * S;                       // unità viewBox → metri
+      var tipX = (11.5 + 1) * u - S / 2, tipY = S / 2 - (5.2 + 0.4) * u;
+      this.handMat = new THREE.MeshBasicMaterial({ map: HAND_TEX, transparent: true, depthWrite: false, opacity: 0 });
+      var hand = new THREE.Mesh(new THREE.PlaneGeometry(S, S), this.handMat);
+      hand.position.set(-tipX, -tipY, 0);
+      this.handPivot = new THREE.Group(); this.handPivot.add(hand);
+      this.handPivot.rotation.z = 0.35;                 // leggermente inclinata, come una mano vera
+      this.ringMat = new THREE.MeshBasicMaterial({ map: RING_TEX, transparent: true, depthWrite: false, opacity: 0 });
+      this.ring = new THREE.Mesh(new THREE.PlaneGeometry(S * 0.9, S * 0.9), this.ringMat);
+      this.ring.position.set(d.x, d.y, -0.004);
+      this.el.object3D.add(this.handPivot); this.el.object3D.add(this.ring);
+      // anche la manina è toccabile
+      var hit = new THREE.Mesh(new THREE.PlaneGeometry(S, S), new THREE.MeshBasicMaterial({ visible: false }));
+      hit.position.copy(hand.position); this.handPivot.add(hit);
+    },
+    tick: function (time, dt) {
+      var d = this.data, show = window.__arVisible && window.__introStarted;
+      this.fade = (this.fade || 0) + ((show ? 1 : 0) - (this.fade || 0)) * Math.min(1, dt / 300);
+      this.t += dt / 1000;
+      var T = 1.8, p = this.t < 0 ? 0 : (this.t % T) / T;  // ciclo di 1,8 s
+      // 0-0.35 avvicinamento, 0.35-0.5 pressione, 0.5-0.8 ritorno, poi pausa
+      var approach = p < 0.35 ? ease(p / 0.35) : p < 0.5 ? 1 : p < 0.8 ? 1 - ease((p - 0.5) / 0.3) : 0;
+      var press = (p >= 0.35 && p < 0.5) ? Math.sin((p - 0.35) / 0.15 * Math.PI) : 0;
+      var off = 0.03 * (1 - approach);
+      this.handPivot.position.set(d.x + off, d.y - off * 1.1, 0.02 + 0.012 * (1 - approach) - 0.006 * press);
+      var s = 1 - 0.14 * press; this.handPivot.scale.set(s, s, s);
+      this.handMat.opacity = this.fade;
+      // onda dal punto toccato
+      var rp = p >= 0.4 ? Math.min(1, (p - 0.4) / 0.45) : 0;
+      var rs = 0.3 + rp * 1.2; this.ring.scale.set(rs, rs, rs);
+      this.ringMat.opacity = rp > 0 && rp < 1 ? Math.min(1, (1 - rp) * 1.4) * this.fade : 0;
+      function ease(x) { return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2; }
+    }
+  });
+
+  // punto del logo da "toccare" (frazioni della larghezza/altezza dal centro) e ritardo dell'animazione
+  function handHTML(l, w, h, i) {
+    var f = l.hand || [0.30, 0.10];
+    return '<a-entity class="clickable" link-open="url: ' + l.url + (l.ext ? '; ext: true' : '') + '" tap-hand="x: ' + (w * f[0]).toFixed(4) + '; y: ' + (h * f[1]).toFixed(4) +
+           '; size: ' + (l.handSize || 0.055) + '; delay: ' + (i * 0.22).toFixed(2) + '"></a-entity>';
+  }
+
+  // Anteprima su PC: trascina per ruotare
+  AFRAME.registerComponent('drag-rotate', {
+    init: function () {
+      var o = this.el.object3D, down = false, lx = 0, ly = 0, ptrs = 0;
+      o.rotation.x = -0.35; o.rotation.y = 0.25;
+      window.addEventListener('pointerdown', function (e) { ptrs++; down = ptrs === 1; lx = e.clientX; ly = e.clientY; });
+      window.addEventListener('pointerup', function () { ptrs = Math.max(0, ptrs - 1); down = false; });
+      window.addEventListener('pointercancel', function () { ptrs = 0; down = false; });
+      window.addEventListener('pointermove', function (e) {
+        if (!down || ptrs > 1) return;
+        o.rotation.y += (e.clientX - lx) * 0.006; o.rotation.x += (e.clientY - ly) * 0.006;
+        o.rotation.x = Math.max(-1.3, Math.min(0.3, o.rotation.x)); lx = e.clientX; ly = e.clientY;
+      });
+    }
+  });
+
+  /* ------------------------------------------------------------------
+     SCENA
+  ------------------------------------------------------------------ */
+  function contentHTML() {
+    var h = '';
+    // Foto AR del palazzo e del cerchio
+    h += '<a-entity id="palazzoWrap" position="' + PALAZZO_IMG.at.x.toFixed(4) + ' ' + PALAZZO_IMG.at.y.toFixed(4) + ' ' + PALAZZO_IMG.z + '" rotation="0 0 ' + PALAZZO_IMG.rotZ + '" scale="0.001 0.001 0.001">' +
+         '<a-entity fade-visible img-plane="src: #img-palazzo; w: ' + PALAZZO_IMG.w + '; h: ' + PALAZZO_IMG.h + '; alphaTest: 0.05; depthWrite: false; max: 1536"></a-entity></a-entity>';
+    // Basi sotto i loghi
+    LINKS.forEach(function (l) {
+      if (!l.plate) return;
+      var a = P(l.plate[0], l.plate[1]), b = P(l.plate[2], l.plate[3]);
+      h += '<a-entity soft-plate="w: ' + (b.x - a.x).toFixed(4) + '; h: ' + (a.y - b.y).toFixed(4) + '; color: ' + l.pc + '" position="' +
+           ((a.x + b.x) / 2).toFixed(4) + ' ' + ((a.y + b.y) / 2).toFixed(4) + ' 0.002"></a-entity>';
+    });
+    // Loghi cliccabili
+    LINKS.forEach(function (l, idx) {
+      var hgt = l.w * l.size[1] / l.size[0];
+      var bob = l.still ? '' : 'animation__bob="property: position; from: 0 0 0; to: 0 0 0.012; dir: alternate; loop: true; dur: ' + (1400 + Math.round(Math.random() * 600)) + '; easing: easeInOutSine"';
+      h += '<a-entity class="pop" position="' + l.at.x.toFixed(4) + ' ' + l.at.y.toFixed(4) + ' ' + l.z + '" rotation="0 0 ' + (l.rotZ || 0) + '" scale="0.001 0.001 0.001">' +
+             '<a-entity ' + bob + '>' +
+               '<a-entity id="btn-' + l.id + '" class="clickable" link-open="url: ' + l.url + (l.ext ? '; ext: true' : '') + '" ' +
+                 'img-plane="src: #img-' + l.id + '; w: ' + l.w.toFixed(4) + '; h: ' + hgt.toFixed(4) + '; double: true"></a-entity>' + handHTML(l, l.w, hgt, idx) +
+             '</a-entity></a-entity>';
+    });
+    return h;
+  }
+
+  function assetsHTML() {
+    var h = '<a-assets timeout="15000">';
+    LINKS.forEach(function (l) { h += '<img id="img-' + l.id + '" src="' + l.src + '" crossorigin="anonymous">'; });
+    h += '<img id="img-palazzo" src="' + PALAZZO_IMG.src + '" crossorigin="anonymous">';
+    if (PREVIEW) h += '<img id="img-target" src="target-preview.jpg" crossorigin="anonymous">';
+    return h + '</a-assets>';
+  }
+
+  var common = 'renderer="colorManagement: true; antialias: true; alpha: true; precision: highp; maxCanvasWidth: 1920; maxCanvasHeight: 1920" ' +
+               'vr-mode-ui="enabled: false" xr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false" loading-screen="enabled: false"';
+  var sceneHTML;
+  if (!PREVIEW) {
+    sceneHTML =
+      '<a-scene id="scene" embedded ' + common + ' ' +
+        'mindar-image="imageTargetSrc: targets.mind; autoStart: false; maxTrack: 1; uiLoading: no; uiScanning: no; uiError: no; filterMinCF: 0.0001; filterBeta: 0.001; warmupTolerance: 3; missTolerance: 8">' +
+        assetsHTML() +
+        '<a-camera position="0 0 0" look-controls="enabled: false" wasd-controls="enabled: false"></a-camera>' +
+        '<a-entity id="anchor" mindar-image-target="targetIndex: 0">' + contentHTML() + '</a-entity>' +
+      '</a-scene>';
+  } else {
+    sceneHTML =
+      '<a-scene id="scene" embedded ' + common + ' background="color: #1b2140">' +
+        assetsHTML() +
+        '<a-camera position="0 0 2.35" look-controls="enabled: false" wasd-controls="enabled: false"></a-camera>' +
+        '<a-entity id="anchor" drag-rotate>' +
+          '<a-plane material="src:#img-target; shader:flat" width="1" height="' + (IMG_H / IMG_W).toFixed(4) + '"></a-plane>' +
+          contentHTML() +
+        '</a-entity>' +
+      '</a-scene>';
+  }
+  document.getElementById('ar-container').innerHTML = sceneHTML;
+
+  /* ------------------------------------------------------------------
+     LOGICA
+  ------------------------------------------------------------------ */
+  var $ = function (id) { return document.getElementById(id); };
+  var scene = $('scene');
+  window.__arVisible = false;
+  var introDone = false, hintShown = false, toastTimer = null;
+
+  function showToast(url) {
+    $('toastLink').href = url; $('toast').classList.remove('hidden');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { $('toast').classList.add('hidden'); }, 4000);
+  }
+  window.showToast = showToast;
+
+  /* ------------------------------------------------------------------
+     SITO DENTRO LA PAGINA + "Torna alla realtà aumentata"
+     La pagina AR non viene mai lasciata: la fotocamera resta accesa
+     e al ritorno l'AR è subito pronta (iOS e Android).
+  ------------------------------------------------------------------ */
+  var siteOpen = false;
+  function mindar() { return scene.systems && scene.systems['mindar-image-system']; }
+  function newFrame(url) {
+    // iframe nuovo ogni volta: niente passi in più nella cronologia, "indietro" torna subito all'AR
+    var old = $('siteFrame'), fr = document.createElement('iframe');
+    fr.id = 'siteFrame'; fr.title = old.title; fr.setAttribute('allow', 'fullscreen');
+    if (url) {
+      fr.addEventListener('load', function () { if (siteOpen) $('siteLoading').classList.add('hidden'); });
+      fr.src = url;
+    }
+    old.parentNode.replaceChild(fr, old);
+  }
+  function openSite(url) {
+    if (siteOpen) return;
+    siteOpen = true;
+    $('extLink').href = url;
+    $('siteLoading').classList.remove('hidden');
+    newFrame(url);
+    $('site').classList.remove('hidden');
+    $('tap-hint').style.opacity = 0;
+    try { if (!PREVIEW && mindar()) mindar().pause(true); } catch (e) {}   // riconoscimento in pausa, fotocamera accesa
+    try { history.pushState({ site: 1 }, ''); } catch (e) {}              // il tasto "indietro" di Android torna all'AR
+  }
+  function closeSite(fromHistory) {
+    if (!siteOpen) return;
+    siteOpen = false;
+    $('site').classList.add('hidden');
+    newFrame(null);
+    try { if (!PREVIEW && mindar()) mindar().unpause(); } catch (e) {}
+    resumeCamera();
+    if (!fromHistory) { try { if (history.state && history.state.site) history.back(); } catch (e) {} }
+  }
+  window.openSite = openSite;
+  $('backAR').addEventListener('click', function () { closeSite(false); });
+  window.addEventListener('popstate', function () { if (siteOpen) closeSite(true); });
+
+  function appear() {
+    window.__arVisible = true;
+    $('scanning').classList.add('hidden');
+    if (!introDone) {
+      introDone = true; window.__introStarted = true;
+      $('palazzoWrap').setAttribute('animation__in', { property: 'scale', from: '0.6 0.6 0.6', to: '1 1 1', dur: 900, easing: 'easeOutBack' });
+      var pops = scene.querySelectorAll('.pop');
+      for (var i = 0; i < pops.length; i++) {
+        pops[i].setAttribute('animation__in', { property: 'scale', from: '0.001 0.001 0.001', to: '1 1 1', dur: 700, delay: 400 + i * 130, easing: 'easeOutBack' });
+      }
+    }
+    if (!hintShown) {
+      hintShown = true;
+      var th = $('tap-hint'); th.classList.remove('hidden');
+      setTimeout(function () { th.style.opacity = 1; }, 1500);
+      setTimeout(function () { th.style.opacity = 0; }, 6500);
+    }
+  }
+  function disappear() { window.__arVisible = false; $('scanning').classList.remove('hidden'); }
+
+  if (/FBAN|FBAV|Instagram|Line\/|WhatsApp|Messenger|Snapchat|Telegram|TikTok|musical_ly/i.test(navigator.userAgent)) $('warn-inapp').classList.remove('hidden');
+
+  function showError(msg) {
+    $('loading').classList.add('hidden'); $('scanning').classList.add('hidden');
+    if (msg) $('errorMsg').textContent = msg;
+    $('error').classList.remove('hidden');
+  }
+  function onSceneReady(cb) { if (scene.hasLoaded) cb(); else scene.addEventListener('loaded', cb, { once: true }); }
+
+  // Avvio automatico: la fotocamera parte subito con il mirino di scansione
+  (function startAR() {
+    if (PREVIEW) { $('loading').classList.add('hidden'); onSceneReady(appear); return; }
+    if (!window.isSecureContext) { showError('La pagina deve essere aperta in HTTPS (GitHub Pages lo fa in automatico).'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { showError('Questo browser non supporta la fotocamera. Apri la pagina con Safari (iPhone) o Chrome (Android).'); return; }
+    onSceneReady(function () { scene.systems['mindar-image-system'].start(); });
+  })();
+
+  var arStarted = false;
+  scene.addEventListener('arReady', function () { arStarted = true; $('loading').classList.add('hidden'); $('scanning').classList.remove('hidden'); });
+  scene.addEventListener('arError', function () { showError('Non è stato possibile accedere alla fotocamera. Controlla i permessi e riprova.'); });
+
+  var anchor = $('anchor');
+  anchor.addEventListener('targetFound', appear);
+  anchor.addEventListener('targetLost', disappear);
+
+  /* ------------------------------------------------------------------
+     RIPRESA FOTOCAMERA: tornando da un sito o da un'altra app, se la
+     fotocamera è chiusa o congelata la pagina AR si riavvia da sola
+  ------------------------------------------------------------------ */
+  var resumeTimer = null;
+  function resumeCamera() {
+    if (PREVIEW || siteOpen || !arStarted) return;
+    var sys = mindar();
+    if (!sys || !sys.video) return;
+    var v = sys.video, stream = v.srcObject;
+    var dead = !stream || (stream.getVideoTracks && stream.getVideoTracks().some(function (t) { return t.readyState === 'ended'; }));
+    if (dead) { location.reload(); return; }
+    var pp = v.play(); if (pp && pp.catch) pp.catch(function () {});
+    var t0 = v.currentTime;
+    clearTimeout(resumeTimer);
+    resumeTimer = setTimeout(function () {                // dopo 1,5 s il video deve essere ripartito
+      if (document.visibilityState !== 'visible' || siteOpen) return;
+      if (v.paused || v.currentTime === t0) location.reload();
+    }, 1500);
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') resumeCamera(); });
+  window.addEventListener('pageshow', function (e) { if (e.persisted) resumeCamera(); });
+  window.addEventListener('focus', function () { setTimeout(resumeCamera, 300); });
+
+  /* ------------------------------------------------------------------
+     TOCCO SUI LOGHI (raycast manuale: funziona anche con lo zoom attivo)
+  ------------------------------------------------------------------ */
+  var THREE = AFRAME.THREE, raycaster = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  function hitAt(cx, cy) {
+    var cam = scene.camera, cv = scene.canvas;
+    if (!cam || !cv) return null;
+    var r = cv.getBoundingClientRect();     // tiene conto dello zoom
+    if (!r.width || !r.height) return null;
+    ndc.set((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+    raycaster.setFromCamera(ndc, cam);
+    var els = scene.querySelectorAll('.clickable'), objs = [];
+    for (var i = 0; i < els.length; i++) objs.push(els[i].object3D);
+    var hits = raycaster.intersectObjects(objs, true);
+    for (var j = 0; j < hits.length; j++) {
+      var o = hits[j].object;
+      while (o) { if (o.el && o.el.classList && o.el.classList.contains('clickable')) return o.el; o = o.parent; }
+    }
+    return null;
+  }
+  function tapAt(cx, cy) {
+    if (!window.__arVisible || siteOpen) return;
+    var R = 18, pts = [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R], [R, R], [-R, R], [R, -R], [-R, -R]];  // tolleranza per il dito
+    for (var i = 0; i < pts.length; i++) {
+      var el = hitAt(cx + pts[i][0], cy + pts[i][1]);
+      if (el) { el.emit('click'); return; }
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     ZOOM CON LE DITA (iOS + Android)
+     Si ingrandisce tutta la vista (fotocamera + AR insieme): i contenuti
+     restano allineati alla pagina e il riconoscimento continua a lavorare.
+  ------------------------------------------------------------------ */
+  var stage = $('ar-container'), zoomBtn = $('zoomBtn'), zoomVal = $('zoomVal');
+  var Z = { s: 1, tx: 0, ty: 0 }, ZMIN = 1, ZMAX = 4, raf = 0;
+  function clampZoom() {
+    var W = window.innerWidth, H = window.innerHeight;
+    Z.s = Math.max(ZMIN, Math.min(ZMAX, Z.s));
+    Z.tx = Math.min(0, Math.max(W - W * Z.s, Z.tx));
+    Z.ty = Math.min(0, Math.max(H - H * Z.s, Z.ty));
+  }
+  function renderZoom() {
+    raf = 0;
+    stage.style.transform = Z.s === 1 ? 'none' : 'translate3d(' + Z.tx.toFixed(1) + 'px,' + Z.ty.toFixed(1) + 'px,0) scale(' + Z.s.toFixed(4) + ')';
+    zoomVal.textContent = (Math.round(Z.s * 10) / 10).toString().replace('.', ',') + '×';
+    zoomBtn.classList.toggle('hidden', Z.s < 1.03);
+  }
+  function applyZoom() { clampZoom(); if (Z.s < 1.0005) { Z.s = 1; Z.tx = 0; Z.ty = 0; } if (!raf) raf = requestAnimationFrame(renderZoom); }
+  function resetZoom() {
+    stage.style.transition = 'transform .28s ease-out';
+    Z.s = 1; Z.tx = 0; Z.ty = 0; applyZoom();
+    setTimeout(function () { stage.style.transition = ''; }, 320);
+  }
+  zoomBtn.addEventListener('click', function (e) { e.stopPropagation(); resetZoom(); });
+  window.addEventListener('resize', applyZoom);
+  window.addEventListener('orientationchange', function () { setTimeout(applyZoom, 300); });
+
+  function isUi(t) { return siteOpen || !!(t && t.closest && t.closest('#site, #toast, #error, #zoomBtn, button, a')); }
+  function dist(a, b) { return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY); }
+  function mid(a, b) { return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 }; }
+
+  var G = null, lastTouch = 0;   // gesto in corso
+  function startPan(t) { G.mode = 'pan'; G.px = t.clientX; G.py = t.clientY; G.tx = Z.tx; G.ty = Z.ty; }
+  function startPinch(a, b) {
+    var m = mid(a, b);
+    G.mode = 'pinch'; G.tap = false;
+    G.d0 = Math.max(1, dist(a, b)); G.s0 = Z.s;
+    G.qx = (m.x - Z.tx) / Z.s; G.qy = (m.y - Z.ty) / Z.s;   // punto della scena sotto le dita
+  }
+  document.addEventListener('touchstart', function (e) {
+    if (isUi(e.target)) return;
+    lastTouch = Date.now();
+    if (e.cancelable) e.preventDefault();
+    stage.style.transition = '';
+    if (!G) G = { tap: true, t0: Date.now(), sx: e.touches[0].clientX, sy: e.touches[0].clientY };
+    if (e.touches.length >= 2) startPinch(e.touches[0], e.touches[1]);
+    else startPan(e.touches[0]);
+  }, { passive: false });
+  document.addEventListener('touchmove', function (e) {
+    if (!G) return;
+    if (e.cancelable) e.preventDefault();
+    if (e.touches.length >= 2) {
+      if (G.mode !== 'pinch') startPinch(e.touches[0], e.touches[1]);
+      var a = e.touches[0], b = e.touches[1], m = mid(a, b);
+      Z.s = Math.max(ZMIN, Math.min(ZMAX, G.s0 * dist(a, b) / G.d0));
+      Z.tx = m.x - Z.s * G.qx; Z.ty = m.y - Z.s * G.qy;    // zoom + spostamento con due dita
+      applyZoom();
+    } else if (e.touches.length === 1) {
+      var t = e.touches[0];
+      if (Math.hypot(t.clientX - G.sx, t.clientY - G.sy) > 10) G.tap = false;
+      if (G.mode !== 'pan') startPan(t);
+      if (Z.s > 1 && !PREVIEW) { Z.tx = G.tx + (t.clientX - G.px); Z.ty = G.ty + (t.clientY - G.py); applyZoom(); }  // spostamento con un dito
+    }
+  }, { passive: false });
+  function touchEnd(e) {
+    if (!G) return;
+    lastTouch = Date.now();
+    if (e.touches.length === 0) {
+      var c = e.changedTouches[0];
+      if (G.tap && e.type === 'touchend' && Date.now() - G.t0 < 600 && c) tapAt(c.clientX, c.clientY);
+      if (Z.s < 1.05 && Z.s !== 1) resetZoom();
+      G = null;
+    } else if (e.touches.length === 1) {
+      startPan(e.touches[0]);    // da due dita a uno: niente salti
+    }
+  }
+  document.addEventListener('touchend', touchEnd, { passive: true });
+  document.addEventListener('touchcancel', touchEnd, { passive: true });
+  // iOS Safari: blocca lo zoom della pagina (altrimenti ingrandisce l'intera interfaccia)
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (n) {
+    document.addEventListener(n, function (e) { if (e.cancelable) e.preventDefault(); }, { passive: false });
+  });
+  document.addEventListener('dblclick', function (e) { e.preventDefault(); }, { passive: false });
+
+  // Mouse (PC / anteprima): click sui loghi + rotellina per lo zoom
+  document.addEventListener('click', function (e) {
+    if (!(e instanceof MouseEvent) || Date.now() - lastTouch < 800 || isUi(e.target)) return;
+    tapAt(e.clientX, e.clientY);
+  });
+  window.addEventListener('wheel', function (e) {
+    if (siteOpen) return;
+    if (e.cancelable) e.preventDefault();
+    var qx = (e.clientX - Z.tx) / Z.s, qy = (e.clientY - Z.ty) / Z.s;
+    Z.s = Math.max(ZMIN, Math.min(ZMAX, Z.s * Math.exp(-e.deltaY * 0.0015)));
+    Z.tx = e.clientX - Z.s * qx; Z.ty = e.clientY - Z.s * qy;
+    applyZoom();
+  }, { passive: false });
+})();
+</script>
+</body>
+</html>
